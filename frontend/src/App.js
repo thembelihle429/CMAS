@@ -98,65 +98,72 @@ const LoginForm = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+    <div className="min-h-screen healthcare-bg flex items-center justify-center relative">
+      <div className="glass-card p-8 rounded-2xl shadow-2xl w-full max-w-md fade-in">
         <div className="text-center mb-8">
-          <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="medical-accent w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
             <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 008 10.172V5L8 4z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">CMAS Login</h1>
-          <p className="text-gray-600">Clinic Medication Availability System</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">🏥 CMAS</h1>
+          <p className="text-blue-600 font-semibold mb-1">Clinic Medication Availability System</p>
+          <p className="text-gray-600 text-sm">University of Mpumalanga Healthcare Solution</p>
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">👤 Username</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent glass-card-light"
               placeholder="Enter your username"
               required
             />
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">🔐 Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent glass-card-light"
               placeholder="Enter your password"
               required
             />
           </div>
           
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg">
-              {error}
+            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg glass-card">
+              ⚠️ {error}
             </div>
           )}
           
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            className="w-full medical-accent text-white py-3 px-4 rounded-lg hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-all transform hover:scale-[1.02]"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? '🔄 Signing in...' : '🚀 Sign In'}
           </button>
         </form>
 
         <div className="mt-6 pt-6 border-t border-gray-200">
           <button
             onClick={initializeAdmin}
-            className="w-full text-sm text-blue-600 hover:text-blue-800"
+            className="w-full text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
           >
-            First time setup? Initialize Admin User
+            🛠️ First time setup? Initialize Admin User
           </button>
+        </div>
+        
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500">
+            © 2025 University of Mpumalanga | Secure Healthcare Management
+          </p>
         </div>
       </div>
     </div>
