@@ -1,107 +1,151 @@
-import React, { useState, useEffect } from "react";
-import "./App.css";
-import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import axios from 'axios';
+import './App.css';
 
-// Auth Context
-const AuthContext = React.createContext();
-
-const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      fetchUserInfo();
-    } else {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchUserInfo = async () => {
-    try {
-      const response = await axios.get(`${API}/auth/me`);
-      setUser(response.data);
-    } catch (error) {
-      localStorage.removeItem('token');
-      delete axios.defaults.headers.common['Authorization'];
-    }
-    setLoading(false);
-  };
-
-  const login = async (username, password) => {
-    try {
-      const response = await axios.post(`${API}/auth/login`, { username, password });
-      const { access_token, user: userData } = response.data;
-      
-      localStorage.setItem('token', access_token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-      setUser(userData);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Login failed' };
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
+// Authentication Context
+const AuthContext = createContext();
 
 const useAuth = () => {
-  const context = React.useContext(AuthContext);
+  const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
 
-// Components
-const LoginForm = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [loading, setLoading] = useState(true);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
+  const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000/api';
 
-    const result = await login(username, password);
-    if (!result.success) {
-      setError(result.error);
+  useEffect(() => {
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      fetchUserInfo();
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
+  }, [token]);
+
+  const fetchUserInfo = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/auth/me`);
+      setUser(response.data);
+    } catch (error) {
+      console.error('Failed to fetch user info:', error);
+      logout();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (username, password) => {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+        username,
+        password
+      });
+      
+      const { access_token, user: userData } = response.data;
+      setToken(access_token);
+      setUser(userData);
+      localStorage.setItem('token', access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || 'Login failed' 
+      };
+    }
+  };
+
+  const logout = () => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
   };
 
   const initializeAdmin = async () => {
     try {
-      await axios.post(`${API}/init/admin`);
-      alert('Admin user created! Username: admin, Password: admin123');
+      const response = await axios.post(`${API_BASE_URL}/init/admin`);
+      return { success: true, data: response.data };
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to create admin user');
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || 'Failed to initialize admin' 
+      };
     }
   };
 
   return (
+    <AuthContext.Provider value={{
+      user,
+      token,
+      loading,
+      login,
+      logout,
+      initializeAdmin,
+      API_BASE_URL
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+// Login Component
+const LoginForm = () => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [showInitAdmin, setShowInitAdmin] = useState(false);
+  const { login, initializeAdmin } = useAuth();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    const result = await login(username, password);
+    
+    if (!result.success) {
+      setError(result.error);
+      if (result.error.includes('User not found') || result.error.includes('Invalid credentials')) {
+        setShowInitAdmin(true);
+      }
+    }
+    
+    setIsLoading(false);
+  };
+
+  const handleInitAdmin = async () => {
+    setIsLoading(true);
+    const result = await initializeAdmin();
+    
+    if (result.success) {
+      setUsername('admin');
+      setPassword('admin123');
+      setError('');
+      setShowInitAdmin(false);
+      alert('Admin user created! Username: admin, Password: admin123');
+    } else {
+      setError(result.error);
+    }
+    
+    setIsLoading(false);
+  };
+
+  return (
     <div className="min-h-screen healthcare-bg flex items-center justify-center relative">
-      <div className="glass-card p-8 rounded-2xl shadow-2xl w-full max-w-md fade-in">
+      <div className="bg-white bg-opacity-95 backdrop-blur-sm p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="medical-accent w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+          <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
             <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 008 10.172V5L8 4z" />
             </svg>
@@ -118,64 +162,62 @@ const LoginForm = () => {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent glass-card-light"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
               placeholder="Enter your username"
               required
             />
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">🔐 Password</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">🔒 Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent glass-card-light"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
               placeholder="Enter your password"
               required
             />
           </div>
           
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg glass-card">
-              ⚠️ {error}
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              {error}
             </div>
           )}
           
           <button
             type="submit"
-            disabled={loading}
-            className="w-full medical-accent text-white py-3 px-4 rounded-lg hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-all transform hover:scale-[1.02]"
+            disabled={isLoading}
+            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200 font-medium disabled:opacity-50"
           >
-            {loading ? '🔄 Signing in...' : '🚀 Sign In'}
+            {isLoading ? '🔄 Signing in...' : '🚀 Sign In'}
           </button>
+          
+          {showInitAdmin && (
+            <button
+              type="button"
+              onClick={handleInitAdmin}
+              disabled={isLoading}
+              className="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200 font-medium disabled:opacity-50"
+            >
+              {isLoading ? '🔄 Creating Admin...' : '👨‍⚕️ Initialize Admin User'}
+            </button>
+          )}
         </form>
-
-        <div className="mt-6 pt-6 border-t border-gray-200">
-          <button
-            onClick={initializeAdmin}
-            className="w-full text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-          >
-            🛠️ First time setup? Initialize Admin User
-          </button>
-        </div>
-        
-        <div className="mt-4 text-center">
-          <p className="text-xs text-gray-500">
-            © 2025 University of Mpumalanga | Secure Healthcare Management
-          </p>
-        </div>
       </div>
     </div>
   );
 };
 
+// Dashboard Component
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [medications, setMedications] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { user, logout } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const { user, logout, API_BASE_URL } = useAuth();
 
   useEffect(() => {
     fetchDashboardData();
@@ -184,57 +226,66 @@ const Dashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await axios.get(`${API}/dashboard`);
+      const response = await axios.get(`${API_BASE_URL}/dashboard`);
       setStats(response.data);
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      setError('Failed to fetch dashboard data');
+      console.error(error);
     }
   };
 
   const fetchMedications = async () => {
     try {
-      const response = await axios.get(`${API}/medications`);
+      const response = await axios.get(`${API_BASE_URL}/medications`);
       setMedications(response.data);
-      setLoading(false);
     } catch (error) {
-      console.error('Failed to fetch medications:', error);
+      setError('Failed to fetch medications');
+      console.error(error);
+    } finally {
       setLoading(false);
     }
   };
 
+  const lowStockMeds = medications.filter(med => med.current_stock <= med.minimum_threshold);
+  const criticalStockMeds = medications.filter(med => med.current_stock === 0);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen dashboard-bg flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading dashboard...</p>
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-lg text-gray-600">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen dashboard-bg">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <header className="bg-white bg-opacity-95 backdrop-blur-sm shadow-lg border-b border-blue-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center py-4">
             <div className="flex items-center">
-              <div className="bg-blue-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="bg-blue-600 w-10 h-10 rounded-lg flex items-center justify-center mr-3">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 008 10.172V5L8 4z" />
                 </svg>
               </div>
-              <h1 className="text-xl font-semibold text-gray-900">CMAS</h1>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">CMAS Dashboard</h1>
+                <p className="text-sm text-gray-600">Clinic Medication Availability System</p>
+              </div>
             </div>
             
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                {user?.username} ({user?.role})
-              </span>
+              <div className="text-right">
+                <p className="text-sm font-medium text-gray-900">{user?.username}</p>
+                <p className="text-xs text-gray-600 capitalize">{user?.role}</p>
+              </div>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm"
+                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition duration-200"
               >
                 Logout
               </button>
@@ -243,78 +294,74 @@ const Dashboard = () => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Navigation Tabs */}
-        <div className="mb-8">
-          <nav className="flex space-x-8">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'dashboard'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => setActiveTab('medications')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'medications'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Medications
-            </button>
-            <button
-              onClick={() => setActiveTab('usage')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'usage'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Usage Log
-            </button>
+      {/* Navigation */}
+      <nav className="bg-white bg-opacity-90 backdrop-blur-sm shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex space-x-8">
+            {['dashboard', 'medications', 'usage'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`py-4 px-1 border-b-2 font-medium text-sm capitalize transition duration-200 ${
+                  activeTab === tab
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
             {user?.role === 'admin' && (
               <button
                 onClick={() => setActiveTab('admin')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition duration-200 ${
                   activeTab === 'admin'
                     ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Admin
+                Admin Panel
               </button>
             )}
-          </nav>
+          </div>
         </div>
+      </nav>
 
-        {/* Tab Content */}
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            {error}
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
-          <DashboardContent stats={stats} medications={medications} fetchData={fetchDashboardData} />
+          <DashboardTab stats={stats} lowStockMeds={lowStockMeds} criticalStockMeds={criticalStockMeds} />
         )}
+        
         {activeTab === 'medications' && (
-          <MedicationsContent medications={medications} fetchMedications={fetchMedications} />
+          <MedicationsTab medications={medications} onRefresh={fetchMedications} />
         )}
-        {activeTab === 'usage' && <UsageContent />}
-        {activeTab === 'admin' && user?.role === 'admin' && <AdminContent fetchMedications={fetchMedications} />}
-      </div>
+        
+        {activeTab === 'usage' && (
+          <UsageTab medications={medications} onRefresh={fetchMedications} />
+        )}
+        
+        {activeTab === 'admin' && user?.role === 'admin' && (
+          <AdminTab onRefresh={fetchMedications} />
+        )}
+      </main>
     </div>
   );
 };
 
-const DashboardContent = ({ stats, medications, fetchData }) => {
-  const lowStockMeds = medications.filter(med => med.current_stock <= med.minimum_threshold);
-  const criticalStockMeds = medications.filter(med => med.current_stock === 0);
-
+// Dashboard Tab Component
+const DashboardTab = ({ stats, lowStockMeds, criticalStockMeds }) => {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
           <div className="flex items-center">
             <div className="bg-blue-100 p-3 rounded-lg">
               <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -323,12 +370,12 @@ const DashboardContent = ({ stats, medications, fetchData }) => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Total Medications</p>
-              <p className="text-2xl font-semibold text-gray-900">{stats?.total_medications || 0}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats?.total_medications || 0}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
+        <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
           <div className="flex items-center">
             <div className="bg-yellow-100 p-3 rounded-lg">
               <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -337,12 +384,12 @@ const DashboardContent = ({ stats, medications, fetchData }) => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Low Stock</p>
-              <p className="text-2xl font-semibold text-yellow-600">{stats?.low_stock_count || 0}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats?.low_stock_count || 0}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
+        <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
           <div className="flex items-center">
             <div className="bg-red-100 p-3 rounded-lg">
               <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -351,21 +398,21 @@ const DashboardContent = ({ stats, medications, fetchData }) => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Critical Stock</p>
-              <p className="text-2xl font-semibold text-red-600">{stats?.critical_stock_count || 0}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats?.critical_stock_count || 0}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
+        <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
           <div className="flex items-center">
             <div className="bg-green-100 p-3 rounded-lg">
               <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5-5-5h5v-5a7.81 7.81 0 006-2.08A7.81 7.81 0 0015 17z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Alerts Sent</p>
-              <p className="text-2xl font-semibold text-green-600">{stats?.recent_alerts?.length || 0}</p>
+              <p className="text-sm font-medium text-gray-600">Recent Alerts</p>
+              <p className="text-2xl font-bold text-gray-900">{stats?.recent_alerts?.length || 0}</p>
             </div>
           </div>
         </div>
@@ -397,399 +444,367 @@ const DashboardContent = ({ stats, medications, fetchData }) => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
 
-      {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Usage</h3>
-          <div className="space-y-3">
-            {stats?.recent_usage?.slice(0, 5).map(usage => (
-              <div key={usage.id} className="flex justify-between items-center py-2 border-b border-gray-100">
-                <div>
-                  <p className="font-medium text-gray-900">{usage.medication_name}</p>
-                  <p className="text-sm text-gray-600">by {usage.user_name}</p>
+// Medications Tab Component
+const MedicationsTab = ({ medications, onRefresh }) => {
+  const getStockStatus = (med) => {
+    if (med.current_stock === 0) return { status: 'critical', color: 'red', text: 'Out of Stock' };
+    if (med.current_stock <= med.minimum_threshold) return { status: 'low', color: 'yellow', text: 'Low Stock' };
+    return { status: 'good', color: 'green', text: 'In Stock' };
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">Medications</h2>
+        <button
+          onClick={onRefresh}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition duration-200"
+        >
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div className="grid gap-6">
+        {medications.map(med => {
+          const stockInfo = getStockStatus(med);
+          return (
+            <div key={med.id} className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900">{med.name}</h3>
+                  <p className="text-gray-600 mt-1">{med.description}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">-{usage.quantity_used}</p>
+                  <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                    stockInfo.color === 'red' ? 'bg-red-100 text-red-800' :
+                    stockInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-green-100 text-green-800'
+                  }`}>
+                    {stockInfo.text}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-4 grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Current Stock</p>
+                  <p className="text-lg font-medium text-gray-900">{med.current_stock} {med.unit}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Minimum Threshold</p>
+                  <p className="text-lg font-medium text-gray-900">{med.minimum_threshold} {med.unit}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Unit</p>
+                  <p className="text-lg font-medium text-gray-900">{med.unit}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// Usage Tab Component
+const UsageTab = ({ medications, onRefresh }) => {
+  const [selectedMedication, setSelectedMedication] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [notes, setNotes] = useState('');
+  const [isLogging, setIsLogging] = useState(false);
+  const [usageHistory, setUsageHistory] = useState([]);
+  const { API_BASE_URL } = useAuth();
+
+  useEffect(() => {
+    fetchUsageHistory();
+  }, []);
+
+  const fetchUsageHistory = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/usage`);
+      setUsageHistory(response.data);
+    } catch (error) {
+      console.error('Failed to fetch usage history:', error);
+    }
+  };
+
+  const handleLogUsage = async (e) => {
+    e.preventDefault();
+    setIsLogging(true);
+
+    try {
+      await axios.post(`${API_BASE_URL}/medications/${selectedMedication}/use`, {
+        quantity_used: parseInt(quantity),
+        notes
+      });
+
+      setSelectedMedication('');
+      setQuantity('');
+      setNotes('');
+      onRefresh();
+      fetchUsageHistory();
+      alert('Usage logged successfully!');
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to log usage');
+    } finally {
+      setIsLogging(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Usage Logging Form */}
+      <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Log Medication Usage</h3>
+        
+        <form onSubmit={handleLogUsage} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Medication</label>
+            <select
+              value={selectedMedication}
+              onChange={(e) => setSelectedMedication(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">Select a medication</option>
+              {medications.map(med => (
+                <option key={med.id} value={med.id}>
+                  {med.name} (Available: {med.current_stock} {med.unit})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Quantity Used</label>
+            <input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              min="1"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows="3"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Any additional notes..."
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLogging}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition duration-200 disabled:opacity-50"
+          >
+            {isLogging ? 'Logging...' : 'Log Usage'}
+          </button>
+        </form>
+      </div>
+
+      {/* Usage History */}
+      <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Usage History</h3>
+        
+        <div className="space-y-4">
+          {usageHistory.map(usage => (
+            <div key={usage.id} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h4 className="font-medium text-gray-900">{usage.medication_name}</h4>
+                  <p className="text-sm text-gray-600">Used by: {usage.user_name}</p>
+                  {usage.notes && <p className="text-sm text-gray-600 mt-1">Notes: {usage.notes}</p>}
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900">-{usage.quantity_used} units</p>
                   <p className="text-xs text-gray-500">
                     {new Date(usage.timestamp).toLocaleString()}
                   </p>
                 </div>
               </div>
-            )) || <p className="text-gray-500 text-sm">No recent usage</p>}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Alerts</h3>
-          <div className="space-y-3">
-            {stats?.recent_alerts?.slice(0, 5).map(alert => (
-              <div key={alert.id} className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm font-medium text-red-800">{alert.medication_name}</p>
-                <p className="text-xs text-red-600">
-                  Stock: {alert.current_stock} (Min: {alert.minimum_threshold})
-                </p>
-                <p className="text-xs text-gray-500">
-                  {new Date(alert.sent_at).toLocaleString()}
-                </p>
-              </div>
-            )) || <p className="text-gray-500 text-sm">No recent alerts</p>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const MedicationsContent = ({ medications, fetchMedications }) => {
-  const [usageForm, setUsageForm] = useState({
-    medicationId: '',
-    quantity: '',
-    notes: ''
-  });
-  const [loading, setLoading] = useState(false);
-
-  const handleUsageSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      await axios.post(`${API}/medications/${usageForm.medicationId}/use`, {
-        quantity_used: parseInt(usageForm.quantity),
-        notes: usageForm.notes
-      });
-
-      alert('Usage logged successfully!');
-      setUsageForm({ medicationId: '', quantity: '', notes: '' });
-      fetchMedications();
-    } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to log usage');
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Usage Form */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Log Medication Usage</h3>
-        <form onSubmit={handleUsageSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Medication</label>
-            <select
-              value={usageForm.medicationId}
-              onChange={(e) => setUsageForm({...usageForm, medicationId: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="">Select medication</option>
-              {medications.filter(med => med.current_stock > 0).map(med => (
-                <option key={med.id} value={med.id}>
-                  {med.name} (Stock: {med.current_stock})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Quantity Used</label>
-            <input
-              type="number"
-              value={usageForm.quantity}
-              onChange={(e) => setUsageForm({...usageForm, quantity: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              min="1"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
-            <input
-              type="text"
-              value={usageForm.notes}
-              onChange={(e) => setUsageForm({...usageForm, notes: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="Patient ID, reason, etc."
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'Logging...' : 'Log Usage'}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Medications List */}
-      <div className="bg-white rounded-xl shadow-sm">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">All Medications</h3>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {medications.map(med => {
-            const isLowStock = med.current_stock <= med.minimum_threshold;
-            const isCritical = med.current_stock === 0;
-            
-            return (
-              <div key={med.id} className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center">
-                      <h4 className="text-lg font-medium text-gray-900">{med.name}</h4>
-                      {isCritical && (
-                        <span className="ml-2 px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
-                          OUT OF STOCK
-                        </span>
-                      )}
-                      {isLowStock && !isCritical && (
-                        <span className="ml-2 px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                          LOW STOCK
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-gray-600 mt-1">{med.description}</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Unit: {med.unit} | Minimum threshold: {med.minimum_threshold}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-2xl font-bold ${
-                      isCritical ? 'text-red-600' : 
-                      isLowStock ? 'text-yellow-600' : 'text-green-600'
-                    }`}>
-                      {med.current_stock}
-                    </p>
-                    <p className="text-sm text-gray-500">in stock</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {medications.length === 0 && (
-            <div className="p-6 text-center text-gray-500">
-              No medications found. Add some medications in the Admin panel.
             </div>
-          )}
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-const UsageContent = () => {
-  const [usage, setUsage] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchUsage();
-  }, []);
-
-  const fetchUsage = async () => {
-    try {
-      const response = await axios.get(`${API}/usage`);
-      setUsage(response.data);
-    } catch (error) {
-      console.error('Failed to fetch usage:', error);
-    }
-    setLoading(false);
-  };
-
-  if (loading) {
-    return <div className="text-center py-8">Loading usage history...</div>;
-  }
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm">
-      <div className="p-6 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">Medication Usage History</h3>
-      </div>
-      <div className="divide-y divide-gray-200">
-        {usage.map(record => (
-          <div key={record.id} className="p-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h4 className="font-medium text-gray-900">{record.medication_name}</h4>
-                <p className="text-sm text-gray-600">Used by: {record.user_name}</p>
-                {record.notes && (
-                  <p className="text-sm text-gray-500 mt-1">Notes: {record.notes}</p>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-lg font-medium text-red-600">-{record.quantity_used}</p>
-                <p className="text-sm text-gray-500">
-                  {new Date(record.timestamp).toLocaleString()}
-                </p>
-              </div>
-            </div>
-          </div>
-        ))}
-        {usage.length === 0 && (
-          <div className="p-6 text-center text-gray-500">
-            No usage records found.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const AdminContent = ({ fetchMedications }) => {
-  const [newMed, setNewMed] = useState({
+// Admin Tab Component
+const AdminTab = ({ onRefresh }) => {
+  const [newMedication, setNewMedication] = useState({
     name: '',
     current_stock: '',
     minimum_threshold: '',
     unit: '',
     description: ''
   });
-  const [loading, setLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isTestingSMS, setIsTestingSMS] = useState(false);
+  const { API_BASE_URL } = useAuth();
 
-  const handleSubmit = async (e) => {
+  const handleAddMedication = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setIsAdding(true);
 
     try {
-      await axios.post(`${API}/medications`, {
-        name: newMed.name,
-        current_stock: parseInt(newMed.current_stock),
-        minimum_threshold: parseInt(newMed.minimum_threshold),
-        unit: newMed.unit,
-        description: newMed.description
+      await axios.post(`${API_BASE_URL}/medications`, {
+        ...newMedication,
+        current_stock: parseInt(newMedication.current_stock),
+        minimum_threshold: parseInt(newMedication.minimum_threshold)
       });
 
-      alert('Medication added successfully!');
-      setNewMed({
+      setNewMedication({
         name: '',
         current_stock: '',
         minimum_threshold: '',
         unit: '',
         description: ''
       });
-      fetchMedications();
+      onRefresh();
+      alert('Medication added successfully!');
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to add medication');
+    } finally {
+      setIsAdding(false);
     }
-    setLoading(false);
   };
 
-  const testSMS = async () => {
+  const handleTestSMS = async () => {
+    setIsTestingSMS(true);
     try {
-      const response = await axios.post(`${API}/alerts/test`);
-      alert('Test SMS sent successfully!');
+      const response = await axios.post(`${API_BASE_URL}/alerts/test`);
+      alert(response.data.success ? 'Test SMS sent successfully!' : 'Failed to send test SMS');
     } catch (error) {
-      alert('Failed to send test SMS: ' + (error.response?.data?.detail || 'Unknown error'));
+      alert(error.response?.data?.detail || 'Failed to send test SMS');
+    } finally {
+      setIsTestingSMS(false);
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Add Medication Form */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
+      <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New Medication</h3>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Medication Name</label>
-            <input
-              type="text"
-              value={newMed.name}
-              onChange={(e) => setNewMed({...newMed, name: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-            />
+        
+        <form onSubmit={handleAddMedication} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Medication Name</label>
+              <input
+                type="text"
+                value={newMedication.name}
+                onChange={(e) => setNewMedication({ ...newMedication, name: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Unit</label>
+              <input
+                type="text"
+                value={newMedication.unit}
+                onChange={(e) => setNewMedication({ ...newMedication, unit: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="e.g., tablets, bottles, doses"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Current Stock</label>
+              <input
+                type="number"
+                value={newMedication.current_stock}
+                onChange={(e) => setNewMedication({ ...newMedication, current_stock: e.target.value })}
+                min="0"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Minimum Threshold</label>
+              <input
+                type="number"
+                value={newMedication.minimum_threshold}
+                onChange={(e) => setNewMedication({ ...newMedication, minimum_threshold: e.target.value })}
+                min="0"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
           </div>
+
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Current Stock</label>
-            <input
-              type="number"
-              value={newMed.current_stock}
-              onChange={(e) => setNewMed({...newMed, current_stock: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              min="0"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Minimum Threshold</label>
-            <input
-              type="number"
-              value={newMed.minimum_threshold}
-              onChange={(e) => setNewMed({...newMed, minimum_threshold: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              min="0"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Unit</label>
-            <input
-              type="text"
-              value={newMed.unit}
-              onChange={(e) => setNewMed({...newMed, unit: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="e.g., tablets, bottles, doses"
-              required
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Description (Optional)</label>
             <textarea
-              value={newMed.description}
-              onChange={(e) => setNewMed({...newMed, description: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              value={newMedication.description}
+              onChange={(e) => setNewMedication({ ...newMedication, description: e.target.value })}
               rows="3"
-              placeholder="Brief description of the medication"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Medication description..."
             />
           </div>
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="bg-blue-600 text-white py-2 px-6 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'Adding...' : 'Add Medication'}
-            </button>
-          </div>
+
+          <button
+            type="submit"
+            disabled={isAdding}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition duration-200 disabled:opacity-50"
+          >
+            {isAdding ? 'Adding...' : 'Add Medication'}
+          </button>
         </form>
       </div>
 
-      {/* Test SMS */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Test SMS Alerts</h3>
-        <p className="text-gray-600 mb-4">
-          Test the SMS alert system by sending a test message to your phone.
-        </p>
+      {/* SMS Test */}
+      <div className="bg-white bg-opacity-95 backdrop-blur-sm p-6 rounded-xl shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">SMS Alert Testing</h3>
+        <p className="text-gray-600 mb-4">Test the SMS alert system by sending a test message to your phone.</p>
+        
         <button
-          onClick={testSMS}
-          className="bg-green-600 text-white py-2 px-6 rounded-lg hover:bg-green-700"
+          onClick={handleTestSMS}
+          disabled={isTestingSMS}
+          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg transition duration-200 disabled:opacity-50"
         >
-          Send Test SMS
+          {isTestingSMS ? 'Sending...' : '📱 Send Test SMS'}
         </button>
       </div>
     </div>
   );
 };
 
+// Main App Component
 function App() {
   return (
     <AuthProvider>
-      <div className="App">
-        <AuthContent />
-      </div>
+      <AppContent />
     </AuthProvider>
   );
 }
 
-const AuthContent = () => {
+const AppContent = () => {
   const { user, loading } = useAuth();
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen healthcare-bg flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-lg text-gray-600">Loading application...</p>
         </div>
       </div>
     );
