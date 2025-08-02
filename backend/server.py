@@ -13,14 +13,31 @@ from datetime import datetime
 from passlib.context import CryptContext
 import jwt
 from twilio.rest import Client
+import logging
+
+# Configure logging first
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.environ.get('MONGO_URL')
+if not mongo_url:
+    logger.error("MONGO_URL environment variable not set")
+    raise ValueError("MONGO_URL environment variable is required")
+
+try:
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ.get('DB_NAME', 'cmas')]
+    logger.info("Connected to MongoDB successfully")
+except Exception as e:
+    logger.error(f"Failed to connect to MongoDB: {e}")
+    raise
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -151,16 +168,23 @@ async def require_admin(current_user = Depends(get_current_user)):
 async def send_sms_alert(phone: str, message: str) -> bool:
     try:
         # Format phone number for South Africa if needed
-        if phone.startswith("0"):
+        if phone.startswith("0") and len(phone) == 10:
             phone = "+27" + phone[1:]
-        elif not phone.startswith("+"):
+        elif not phone.startswith("+") and len(phone) == 9:
             phone = "+27" + phone
+        elif not phone.startswith("+27") and not phone.startswith("+"):
+            phone = "+27" + phone.lstrip("0")
+            
+        if not twilio_client:
+            logger.error("Twilio client not initialized")
+            return False
             
         message_obj = twilio_client.messages.create(
             body=message,
             from_=TWILIO_PHONE,
             to=phone
         )
+        logger.info(f"SMS sent successfully to {phone}")
         return True
     except Exception as e:
         logger.error(f"SMS sending failed: {e}")
@@ -388,12 +412,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
