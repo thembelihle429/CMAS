@@ -6,9 +6,9 @@
   text-align: left;
 }
 
-/* Healthcare Background Images */
+/* Medicine Background Images */
 .healthcare-bg {
-  background-image: url('https://images.unsplash.com/photo-1655313719493-16ebe4906441?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwyfHxoZWFsdGhjYXJlfGVufDB8fHxibHVlfDE3NTQwNjEzMjZ8MA&ixlib=rb-4.1.0&q=85');
+  background-image: url('https://images.unsplash.com/photo-1559757148-5c350d0d3c56?crop=entropy&cs=srgb&fm=jpg&ixlib=rb-4.1.0&q=85&w=1920');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -22,13 +22,13 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(59, 130, 246, 0.15);
   pointer-events: none;
 }
 
 .dashboard-bg {
-  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(147, 197, 253, 0.05) 100%),
-                    url('https://images.unsplash.com/photo-1655313719493-16ebe4906441?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwyfHxoZWFsdGhjYXJlfGVufDB8fHxibHVlfDE3NTQwNjEzMjZ8MA&ixlib=rb-4.1.0&q=85');
+  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(147, 197, 253, 0.08) 100%),
+                    url('https://images.unsplash.com/photo-1576091160399-112ba8d25d1f?crop=entropy&cs=srgb&fm=jpg&ixlib=rb-4.1.0&q=85&w=1920');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
