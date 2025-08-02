@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import './App.css';
 
 const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000/api';
@@ -211,6 +211,7 @@ const Dashboard = () => {
   const [medications, setMedications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [showAIChat, setShowAIChat] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
@@ -294,29 +295,50 @@ const Dashboard = () => {
       {/* Navigation Tabs */}
       <nav className="bg-white bg-opacity-95 backdrop-blur-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
-            {['overview', 'medications', 'usage'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
-                  activeTab === tab
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                {tab === 'overview' && '📊'} {tab === 'medications' && '💊'} {tab === 'usage' && '📋'} {tab}
-              </button>
-            ))}
+          <div className="flex justify-between items-center">
+            <div className="flex space-x-8">
+              {['overview', 'medications', 'usage'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
+                    activeTab === tab
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  {tab === 'overview' && '📊'} {tab === 'medications' && '💊'} {tab === 'usage' && '📋'} {tab}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowAIChat(!showAIChat)}
+              className={`py-2 px-4 rounded-lg font-medium text-sm transition duration-200 ${
+                showAIChat
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-purple-100 text-purple-600 hover:bg-purple-200'
+              }`}
+            >
+              🤖 AI Assistant
+            </button>
           </div>
         </div>
       </nav>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'overview' && <OverviewTab dashboardData={dashboardData} />}
-        {activeTab === 'medications' && <MedicationsTab medications={medications} fetchMedications={fetchMedications} />}
-        {activeTab === 'usage' && <UsageTab medications={medications} />}
+        <div className="flex gap-8">
+          <div className={`transition-all duration-300 ${showAIChat ? 'w-2/3' : 'w-full'}`}>
+            {activeTab === 'overview' && <OverviewTab dashboardData={dashboardData} />}
+            {activeTab === 'medications' && <MedicationsTab medications={medications} fetchMedications={fetchMedications} />}
+            {activeTab === 'usage' && <UsageTab medications={medications} />}
+          </div>
+          {showAIChat && (
+            <div className="w-1/3">
+              <AIChat />
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );
@@ -460,6 +482,225 @@ const MedicationsTab = ({ medications, fetchMedications }) => {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// AI Chat Component
+const AIChat = () => {
+  const { token } = useAuth();
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+    fetchAISuggestions();
+  }, [messages]);
+
+  const fetchAISuggestions = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai/suggestions`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSuggestions(data.suggestions);
+      }
+    } catch (error) {
+      console.error('Failed to fetch AI suggestions:', error);
+    }
+  };
+
+  const sendMessage = async (message = inputMessage) => {
+    if (!message.trim()) return;
+
+    const userMessage = { role: 'user', content: message, timestamp: new Date() };
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          message: message,
+          user_id: 'current_user'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const aiMessage = {
+          role: 'assistant',
+          content: data.response,
+          suggestions: data.suggestions,
+          relatedMedications: data.related_medications,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, aiMessage]);
+      } else {
+        const errorMessage = {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again.',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      const errorMessage = {
+        role: 'assistant',
+        content: 'Network error. Please check your connection and try again.',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const quickActions = [
+    "What medications are running low?",
+    "Show me today's usage patterns",
+    "How do I log medication usage?",
+    "What should I reorder first?",
+    "Generate a stock report"
+  ];
+
+  return (
+    <div className="bg-white bg-opacity-95 backdrop-blur-sm rounded-xl shadow-lg h-full flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b bg-purple-50 rounded-t-xl">
+        <h3 className="text-lg font-semibold text-purple-800 flex items-center">
+          🤖 AI Assistant
+        </h3>
+        <p className="text-sm text-purple-600">Ask me about medications, usage, or system features</p>
+      </div>
+
+      {/* AI Suggestions */}
+      {suggestions.length > 0 && messages.length === 0 && (
+        <div className="p-4 bg-blue-50 border-b">
+          <h4 className="text-sm font-medium text-blue-800 mb-2">💡 System Insights</h4>
+          <div className="space-y-1">
+            {suggestions.map((suggestion, index) => (
+              <p key={index} className="text-xs text-blue-700 bg-blue-100 rounded px-2 py-1">
+                {suggestion}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 p-4 overflow-y-auto max-h-96">
+        {messages.length === 0 ? (
+          <div className="text-center text-gray-500">
+            <div className="mb-4">
+              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                🤖
+              </div>
+              <p className="text-sm">Hi! I'm your AI assistant for CMAS.</p>
+              <p className="text-xs mt-1">Ask me anything about medications!</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-600">Quick actions:</p>
+              {quickActions.slice(0, 3).map((action, index) => (
+                <button
+                  key={index}
+                  onClick={() => sendMessage(action)}
+                  className="block w-full text-xs bg-gray-100 hover:bg-gray-200 rounded p-2 text-left transition duration-200"
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-xs px-3 py-2 rounded-lg text-sm ${
+                    message.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}
+                >
+                  <p>{message.content}</p>
+                  {message.suggestions && message.suggestions.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <p className="text-xs font-medium mb-1">Suggestions:</p>
+                      {message.suggestions.map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => sendMessage(suggestion)}
+                          className="block w-full text-xs bg-white bg-opacity-20 hover:bg-opacity-30 rounded p-1 mb-1 text-left transition duration-200"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 px-3 py-2 rounded-lg text-sm">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="p-4 border-t">
+        <div className="flex space-x-2">
+          <input
+            type="text"
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Ask me about medications..."
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+            disabled={isLoading}
+          />
+          <button
+            onClick={() => sendMessage()}
+            disabled={isLoading || !inputMessage.trim()}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition duration-200"
+          >
+            {isLoading ? '...' : '📤'}
+          </button>
+        </div>
       </div>
     </div>
   );

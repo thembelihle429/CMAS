@@ -14,6 +14,8 @@ from passlib.context import CryptContext
 import jwt
 from twilio.rest import Client
 import logging
+import openai
+import json
 
 # Configure logging first
 logging.basicConfig(
@@ -50,6 +52,11 @@ twilio_client = Client(
     os.environ.get("TWILIO_AUTH_TOKEN")
 )
 TWILIO_PHONE = os.environ.get("TWILIO_PHONE", "+27712725601")
+
+# OpenAI Setup
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+if not openai.api_key:
+    logger.warning("OPENAI_API_KEY not set - AI features will be disabled")
 
 # App will be created below with lifespan
 
@@ -126,6 +133,16 @@ class Alert(BaseModel):
     sent_at: datetime = Field(default_factory=datetime.utcnow)
     status: str = "sent"  # "sent", "failed"
 
+class ChatMessage(BaseModel):
+    message: str
+    user_id: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class ChatResponse(BaseModel):
+    response: str
+    suggestions: List[str] = []
+    related_medications: List[str] = []
+
 class DashboardStats(BaseModel):
     total_medications: int
     low_stock_count: int
@@ -188,6 +205,83 @@ async def send_sms_alert(phone: str, message: str) -> bool:
     except Exception as e:
         logger.error(f"SMS sending failed: {e}")
         return False
+
+async def get_ai_response(message: str, user_context: dict, medications: List[dict]) -> ChatResponse:
+    """Get AI response using OpenAI API with medication context"""
+    if not openai.api_key:
+        return ChatResponse(
+            response="AI features are currently unavailable. Please contact your administrator.",
+            suggestions=["Check medication stock", "Log medication usage", "View alerts"]
+        )
+    
+    try:
+        # Prepare medication context for AI
+        med_context = ""
+        if medications:
+            med_context = "Current medications in inventory:\n"
+            for med in medications:
+                status = "Out of Stock" if med["current_stock"] == 0 else "Low Stock" if med["current_stock"] <= med["minimum_threshold"] else "In Stock"
+                med_context += f"- {med['name']}: {med['current_stock']} {med['unit']} ({status})\n"
+        
+        system_prompt = f"""You are a helpful AI assistant for a Clinic Medication Availability System (CMAS). 
+You help healthcare workers manage medication inventory, usage, and provide medical information.
+
+User role: {user_context.get('role', 'nurse')}
+User name: {user_context.get('username', 'User')}
+
+{med_context}
+
+Guidelines:
+- Be helpful and professional
+- Focus on medication management and healthcare topics
+- Provide accurate information about medications when possible
+- Suggest practical actions within the CMAS system
+- If asked about specific medical advice, remind users to consult with healthcare professionals
+- Keep responses concise and actionable"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        # Generate suggestions based on message content
+        suggestions = []
+        message_lower = message.lower()
+        
+        if any(word in message_lower for word in ["stock", "inventory", "available", "count"]):
+            suggestions.extend(["Check current stock levels", "View low stock alerts"])
+        
+        if any(word in message_lower for word in ["use", "usage", "administer", "give"]):
+            suggestions.extend(["Log medication usage", "View usage history"])
+        
+        if any(word in message_lower for word in ["alert", "notification", "warn"]):
+            suggestions.extend(["View recent alerts", "Test SMS alerts"])
+        
+        # Find related medications mentioned in the message
+        related_meds = []
+        for med in medications:
+            if med["name"].lower() in message_lower:
+                related_meds.append(med["name"])
+        
+        return ChatResponse(
+            response=ai_response,
+            suggestions=suggestions[:3],  # Limit to 3 suggestions
+            related_medications=related_meds[:3]  # Limit to 3 related meds
+        )
+        
+    except Exception as e:
+        logger.error(f"AI response generation failed: {e}")
+        return ChatResponse(
+            response="I'm having trouble processing your request right now. Please try again later or contact support.",
+            suggestions=["Check system status", "View dashboard", "Contact administrator"]
+        )
 
 async def check_and_send_alerts(medication: Medication):
     """Check if medication needs alerts and send them"""
@@ -383,6 +477,78 @@ async def test_sms_alert(current_user = Depends(require_admin)):
     return {"message": "Test SMS sent", "success": success}
 
 # Initialize default admin user
+# AI Chat Routes
+@api_router.post("/ai/chat", response_model=ChatResponse)
+async def ai_chat(chat_data: ChatMessage, current_user = Depends(get_current_user)):
+    """Chat with AI assistant about medications and system features"""
+    
+    # Get current medications for context
+    medications = await db.medications.find().to_list(1000)
+    
+    # Get user context
+    user_context = {
+        "user_id": current_user["user_id"],
+        "username": current_user["username"],
+        "role": current_user["role"]
+    }
+    
+    # Get AI response
+    response = await get_ai_response(chat_data.message, user_context, medications)
+    
+    # Log the chat interaction
+    chat_log = {
+        "user_id": current_user["user_id"],
+        "username": current_user["username"],
+        "message": chat_data.message,
+        "ai_response": response.response,
+        "timestamp": datetime.utcnow()
+    }
+    await db.chat_logs.insert_one(chat_log)
+    
+    return response
+
+@api_router.get("/ai/suggestions")
+async def get_ai_suggestions(current_user = Depends(get_current_user)):
+    """Get AI-powered suggestions based on current system state"""
+    
+    # Get system data for context
+    medications = await db.medications.find().to_list(1000)
+    low_stock_meds = [med for med in medications if med["current_stock"] <= med["minimum_threshold"]]
+    out_of_stock_meds = [med for med in medications if med["current_stock"] == 0]
+    
+    suggestions = []
+    
+    if out_of_stock_meds:
+        suggestions.append(f"⚠️ {len(out_of_stock_meds)} medications are out of stock. Consider reordering immediately.")
+    
+    if low_stock_meds:
+        suggestions.append(f"📊 {len(low_stock_meds)} medications are running low. Review stock levels.")
+    
+    # Get recent usage patterns
+    recent_usage = await db.medication_usage.find().sort("timestamp", -1).limit(10).to_list(10)
+    if recent_usage:
+        most_used_today = {}
+        today = datetime.utcnow().date()
+        
+        for usage in recent_usage:
+            usage_date = usage["timestamp"].date()
+            if usage_date == today:
+                med_name = usage["medication_name"]
+                most_used_today[med_name] = most_used_today.get(med_name, 0) + usage["quantity_used"]
+        
+        if most_used_today:
+            top_used = max(most_used_today, key=most_used_today.get)
+            suggestions.append(f"📈 {top_used} is being used frequently today. Monitor stock levels.")
+    
+    if not suggestions:
+        suggestions = [
+            "✅ All medications are adequately stocked.",
+            "💡 Consider reviewing usage patterns for optimization.",
+            "🔍 Check for any pending alerts or notifications."
+        ]
+    
+    return {"suggestions": suggestions[:5]}  # Limit to 5 suggestions
+
 @api_router.post("/init/admin")
 async def initialize_admin():
     """Initialize default admin user - only works if no users exist"""
