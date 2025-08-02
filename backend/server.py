@@ -400,24 +400,6 @@ async def initialize_admin():
     await db.users.insert_one(admin_user.dict())
     return {"message": "Admin user created", "username": "admin", "password": "admin123"}
 
-# Root endpoint
-@app.get("/")
-async def root():
-    return {"message": "Clinic Medication Availability System API", "status": "running", "version": "1.0"}
-
-# Include the router in the main app
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -427,8 +409,25 @@ async def lifespan(app: FastAPI):
     # Shutdown
     client.close()
 
-# Remove the old app creation and recreate with lifespan
+# Create FastAPI app with lifespan
 app = FastAPI(title="Clinic Medication Availability System", lifespan=lifespan)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {"message": "Clinic Medication Availability System API", "status": "running", "version": "1.0"}
+
+# Include the router in the main app
+app.include_router(api_router)
 
 if __name__ == "__main__":
     import uvicorn
