@@ -51,8 +51,7 @@ twilio_client = Client(
 )
 TWILIO_PHONE = os.environ.get("TWILIO_PHONE", "+27712725601")
 
-# Create the main app
-app = FastAPI(title="Clinic Medication Availability System")
+# App will be created below with lifespan
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -401,6 +400,11 @@ async def initialize_admin():
     await db.users.insert_one(admin_user.dict())
     return {"message": "Admin user created", "username": "admin", "password": "admin123"}
 
+# Root endpoint
+@app.get("/")
+async def root():
+    return {"message": "Clinic Medication Availability System API", "status": "running", "version": "1.0"}
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -414,9 +418,17 @@ app.add_middleware(
 
 
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
     client.close()
+
+# Remove the old app creation and recreate with lifespan
+app = FastAPI(title="Clinic Medication Availability System", lifespan=lifespan)
 
 if __name__ == "__main__":
     import uvicorn
