@@ -13,4 +13,4 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd backend && python server.py"
+args = "cd backend && pip install -r requirements.txt && python server.py"
